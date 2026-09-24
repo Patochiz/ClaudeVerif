@@ -256,6 +256,7 @@ class ClaudeVerifInvoice extends ClaudeVerifTools
 			$invIds[(int) $o->rowid] = true;
 		}
 		$list = implode(',', array_map('intval', array_keys($invIds)));
+		$proforma = $this->proformaIds(array_keys($invIds));
 
 		$others = array();
 		$ignored = array();
@@ -274,7 +275,13 @@ class ClaudeVerifInvoice extends ClaudeVerifTools
 				continue;
 			}
 			if ((int) $o->fk_statut === 0 || (int) $o->fk_statut === 3 || (int) $o->type === 3) {
-				$info['non_comptee'] = ((int) $o->type === 3) ? 'acompte' : (((int) $o->fk_statut === 0) ? 'brouillon' : 'abandonnée');
+				if ((int) $o->type === 3) {
+					$info['non_comptee'] = 'acompte';
+				} elseif ((int) $o->fk_statut === 0) {
+					$info['non_comptee'] = !empty($proforma[(int) $o->rowid]) ? 'pro forma' : 'brouillon (à valider)';
+				} else {
+					$info['non_comptee'] = 'abandonnée';
+				}
 				$ignored[] = $info;
 				continue;
 			}
@@ -409,7 +416,9 @@ class ClaudeVerifInvoice extends ClaudeVerifTools
 			'lignes' => $out,
 			'regles' => "Rapprochement par produit (ou libellé pour les lignes libres), toutes commandes liées confondues. "
 				."Livré = expéditions validées ou clôturées. Déjà facturé = autres factures validées liées aux commandes, avoirs déduits, "
-				."situations au prorata de l'avancement ; brouillons, abandonnées et acomptes exclus. "
+				."situations au prorata de l'avancement ; pro forma, brouillons, abandonnées et acomptes exclus. "
+				."Une pro forma (brouillon avec la case Pro forma cochée) est normale et sans risque. "
+				."Un simple brouillon lié à une commande déjà facturée est un risque de double facturation. "
 				."LIVRÉ NON FACTURÉ est informatif (reliquat à facturer).",
 		);
 	}
