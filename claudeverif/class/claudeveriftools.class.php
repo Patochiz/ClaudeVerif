@@ -5,6 +5,7 @@
  */
 
 require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
+require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
 dol_include_once('/claudeverif/class/claudeverifmail.class.php');
 
@@ -59,7 +60,8 @@ class ClaudeVerifTools
 			),
 			array(
 				'name' => 'get_commande',
-				'description' => "Détail complet d'une commande client : en-tête, client, conditions, totaux, notes, "
+				'description' => "Détail complet d'une commande client : en-tête, client (avec adresse), contacts liés "
+					."(livraison, facturation, suivi… avec adresse et téléphone), conditions, totaux, notes, "
 					."champs complémentaires, objets liés (devis…) et toutes les lignes avec leurs champs complémentaires.",
 				'inputSchema' => array(
 					'type' => 'object',
@@ -246,6 +248,22 @@ class ClaudeVerifTools
 			}
 		}
 
+		// Contacts externes liés (livraison, facturation, suivi…)
+		$contacts = array();
+		foreach ((array) $cmd->liste_contact(-1, 'external') as $c) {
+			$contact = new Contact($this->db);
+			$found = ((int) $c['id'] > 0 && $contact->fetch((int) $c['id']) > 0);
+			$contacts[] = array(
+				'type' => (string) $c['code'],
+				'libelle_type' => (string) ($c['libelle'] ?? ''),
+				'nom' => trim(($c['firstname'] ?? '').' '.($c['lastname'] ?? '')),
+				'adresse' => $found ? (string) $contact->address : '',
+				'cp' => $found ? (string) $contact->zip : '',
+				'ville' => $found ? (string) $contact->town : '',
+				'telephone' => $found ? (string) ($contact->phone_pro ?: ($contact->phone_mobile ?: $contact->phone_perso)) : '',
+			);
+		}
+
 		$lines = array();
 		foreach ((array) $cmd->lines as $l) {
 			$lines[] = array(
@@ -276,9 +294,13 @@ class ClaudeVerifTools
 				'id' => (int) $soc->id,
 				'nom' => $soc->name,
 				'code_client' => $soc->code_client,
+				'adresse' => (string) $soc->address,
+				'cp' => (string) $soc->zip,
 				'ville' => $soc->town,
+				'pays' => (string) ($soc->country ?: $soc->country_code),
 				'remise_percent_defaut' => (float) $soc->remise_percent,
 			),
+			'contacts' => $contacts,
 			'conditions_reglement' => $this->transOr('PaymentCondition'.($cmd->cond_reglement_code ?? ''), (string) ($cmd->cond_reglement_doc ?? ($cmd->cond_reglement_code ?? ''))),
 			'mode_reglement' => $this->transOr('PaymentType'.($cmd->mode_reglement_code ?? ''), (string) ($cmd->mode_reglement ?? '')),
 			'totaux' => array(
