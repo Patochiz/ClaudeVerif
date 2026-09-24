@@ -1,0 +1,1 @@
+smalot/pdfparser v2.12.2 (LGPL-3.0) — https://github.com/smalot/pdfparser

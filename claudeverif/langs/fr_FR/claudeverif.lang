@@ -1,0 +1,3 @@
+Module500900Name = ClaudeVerif
+Module500900Desc = Connecteur MCP pour Claude : vérification des commandes clients (Dolibarr + mails IMAP)
+ClaudeVerifSetup = Configuration ClaudeVerif
