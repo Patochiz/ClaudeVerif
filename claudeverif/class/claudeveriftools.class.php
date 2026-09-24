@@ -323,6 +323,10 @@ class ClaudeVerifTools
 			}
 			$code = preg_replace('/^options_/', '', $key);
 			$label = $this->extrafields->attributes[$elementtype]['label'][$code] ?? $code;
+			if (($this->extrafields->attributes[$elementtype]['type'][$code] ?? '') === 'boolean') {
+				$out[$label] = !empty($value) ? 'Oui' : 'Non';
+				continue;
+			}
 			$display = $this->clean($this->extrafields->showOutputField($code, $value, '', $elementtype));
 			if ($display === '') {
 				continue;
@@ -330,6 +334,59 @@ class ClaudeVerifTools
 			$out[$label] = $display;
 		}
 		return $out ? $out : new stdClass();
+	}
+
+	/**
+	 * Code de l'extrafield booléen « Pro forma » des factures
+	 *
+	 * @return string Code du champ, '' si absent
+	 */
+	protected function proformaExtrafieldCode(): string
+	{
+		if ($this->extrafields === null) {
+			$this->extrafields = new ExtraFields($this->db);
+		}
+		if (empty($this->extrafieldsLoaded['facture'])) {
+			$this->extrafields->fetch_name_optionals_label('facture');
+			$this->extrafieldsLoaded['facture'] = true;
+		}
+		$attrs = $this->extrafields->attributes['facture'] ?? array();
+		foreach (($attrs['type'] ?? array()) as $code => $type) {
+			if ($type !== 'boolean') {
+				continue;
+			}
+			$label = (string) ($attrs['label'][$code] ?? '');
+			if (preg_match('/pro\s*-?\s*forma/i', $label) || preg_match('/pro\s*-?\s*forma/i', (string) $code)) {
+				return (string) $code;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Factures dont la case « Pro forma » est cochée
+	 *
+	 * @param array $ids Ids de factures
+	 * @return array [id => true]
+	 */
+	protected function proformaIds(array $ids): array
+	{
+		$code = $this->proformaExtrafieldCode();
+		if ($code === '' || empty($ids)) {
+			return array();
+		}
+		$sql = "SELECT fk_object FROM ".MAIN_DB_PREFIX."facture_extrafields";
+		$sql .= " WHERE fk_object IN (".implode(',', array_map('intval', $ids)).")";
+		$sql .= " AND ".$this->db->escape($code)." = 1";
+		$out = array();
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			while ($o = $this->db->fetch_object($resql)) {
+				$out[(int) $o->fk_object] = true;
+			}
+			$this->db->free($resql);
+		}
+		return $out;
 	}
 
 	/**
