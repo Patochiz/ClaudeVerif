@@ -122,7 +122,7 @@ class ClaudeVerifTools
 				),
 			),
 		);
-		return array_merge($defs, ClaudeVerifInvoice::definitions());
+		return array_merge($defs, ClaudeVerifInvoice::definitions(), ClaudeVerifStock::definitions());
 	}
 
 	/**
@@ -156,6 +156,9 @@ class ClaudeVerifTools
 			case 'controle_facture':
 				$inv = new ClaudeVerifInvoice($this->db, $this->user);
 				return $inv->controleFacture($args);
+			case 'get_stock':
+				$stock = new ClaudeVerifStock($this->db, $this->user);
+				return $stock->getStock($args);
 		}
 		throw new Exception('Outil inconnu : '.$name);
 	}
@@ -464,5 +467,6 @@ class ClaudeVerifTools
 	}
 }
 
-// Outils factures (sous-classe : chargée après la classe mère)
+// Outils factures et stock (sous-classes : chargées après la classe mère)
 dol_include_once('/claudeverif/class/claudeverifinvoice.class.php');
+dol_include_once('/claudeverif/class/claudeverifstock.class.php');
