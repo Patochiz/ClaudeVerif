@@ -77,15 +77,18 @@ class ClaudeVerifTools
 			array(
 				'name' => 'get_pdf_commande',
 				'description' => "Relit le PDF de l'AR (accusé de réception de commande) tel que généré par Dolibarr, pour le vérifier avant envoi au client. "
+					."Fichiers {ref}*.pdf du dossier de la commande : par défaut l'AR ({ref}_AR.pdf, sinon {ref}.pdf, sinon le plus récent) ; "
+					."les autres (ex. fiche de production {ref}-FP.pdf) se lisent avec le paramètre 'fichier'. "
 					."Renvoie le nom du fichier, sa date de modification (avec un avertissement si la commande a été modifiée après la génération du PDF : "
 					."le PDF n'est alors peut-être plus à jour), le nombre de pages et le contenu : texte extrait (mode auto ou texte), "
 					."pages en images (mode images, 5 pages max par appel, utiliser 'pages' pour la suite) ou OCR Mistral si configuré. "
-					."Liste aussi les autres PDF du dossier de la commande (sans les lire). Ne génère jamais le PDF : s'il est absent, le signaler.",
+					."Liste aussi les autres PDF de la commande (sans les lire). Ne génère jamais le PDF : s'il est absent, le signaler.",
 				'inputSchema' => array(
 					'type' => 'object',
 					'properties' => array(
 						'ref' => array('type' => 'string', 'description' => 'Référence Dolibarr exacte de la commande (ex. 2610_049)'),
 						'id' => array('type' => 'integer', 'description' => 'Identifiant interne (alternative à ref)'),
+						'fichier' => array('type' => 'string', 'description' => 'Nom du PDF à lire parmi ceux de la commande (ex. 2610_047-FP.pdf). Défaut : l\'AR'),
 						'mode' => array('type' => 'string', 'enum' => array('auto', 'texte', 'images', 'ocr'), 'description' => 'Défaut : auto (texte du PDF)'),
 						'pages' => array('type' => 'string', 'description' => 'Pages voulues, ex. "1-3" ou "2,4" (défaut : toutes)'),
 					),
@@ -390,15 +393,56 @@ class ClaudeVerifTools
 			throw new Exception('Référence de commande invalide : '.$cmd->ref);
 		}
 		$dir = $root.'/'.$name;
-		$file = $dir.'/'.$name.'.pdf';
-
 		$dirReal = is_dir($dir) ? realpath($dir) : false;
-		if ($dirReal !== false && strpos($dirReal.'/', $rootReal.'/') !== 0) {
+		if ($dirReal === false) {
+			throw new Exception('PDF non généré pour '.$cmd->ref.' (aucun document dans le dossier de la commande)');
+		}
+		if (strpos($dirReal.'/', $rootReal.'/') !== 0) {
 			throw new Exception('Chemin refusé (hors du répertoire des commandes)');
 		}
-		$fileReal = is_file($file) ? realpath($file) : false;
-		if ($fileReal === false) {
-			throw new Exception('PDF non généré pour '.$cmd->ref.' (le générer depuis la fiche commande dans Dolibarr)');
+
+		// PDF de la commande : {ref}*.pdf (ex. 2610_047_AR.pdf, 2610_047-FP.pdf), le plus récent d'abord.
+		// Après la ref : fin du nom ou un caractère autre qu'un chiffre (2610_04 ne prend pas 2610_047…)
+		$pattern = '/^'.preg_quote($name, '/').'([^0-9].*)?\.pdf$/i';
+		$files = array();
+		foreach ((array) dol_dir_list($dirReal, 'files', 0, '\.pdf$', '', 'date', SORT_DESC) as $f) {
+			if (preg_match($pattern, $f['name'])) {
+				$files[$f['name']] = (int) $f['date'];
+			}
+		}
+		if (!$files) {
+			throw new Exception('PDF non généré pour '.$cmd->ref.' (aucun fichier '.$name.'*.pdf dans le dossier de la commande)');
+		}
+
+		// Fichier lu : celui demandé (parmi la liste), sinon l'AR ({ref}_AR.pdf), sinon {ref}.pdf, sinon le plus récent
+		$wanted = trim((string) ($args['fichier'] ?? ''));
+		if ($wanted !== '') {
+			$chosen = null;
+			foreach (array_keys($files) as $fn) {
+				if (strcasecmp($fn, $wanted) === 0) {
+					$chosen = $fn;
+				}
+			}
+			if ($chosen === null) {
+				throw new Exception('Fichier introuvable pour '.$cmd->ref.' : '.$wanted.' (disponibles : '.implode(', ', array_keys($files)).')');
+			}
+		} else {
+			$chosen = null;
+			foreach (array($name.'_AR.pdf', $name.'.pdf') as $pref) {
+				foreach (array_keys($files) as $fn) {
+					if ($chosen === null && strcasecmp($fn, $pref) === 0) {
+						$chosen = $fn;
+					}
+				}
+			}
+			if ($chosen === null) {
+				$chosen = array_key_first($files);
+			}
+		}
+
+		$fileReal = realpath($dirReal.'/'.$chosen);
+		if ($fileReal === false || !is_file($fileReal)) {
+			throw new Exception('Lecture du PDF impossible : '.$chosen);
 		}
 		if (strpos($fileReal, $rootReal.'/') !== 0) {
 			throw new Exception('Chemin refusé (hors du répertoire des commandes)');
@@ -406,7 +450,7 @@ class ClaudeVerifTools
 
 		$content = file_get_contents($fileReal);
 		if ($content === false) {
-			throw new Exception('Lecture du PDF impossible : '.$name.'.pdf');
+			throw new Exception('Lecture du PDF impossible : '.$chosen);
 		}
 		$mtime = (int) filemtime($fileReal);
 
@@ -420,14 +464,11 @@ class ClaudeVerifTools
 			$this->db->free($resql);
 		}
 
-		// Autres PDF du dossier (versions, pro forma…) : nom et date seulement
+		// Autres PDF de la commande (FP, versions…) : nom et date seulement, lisibles avec le paramètre fichier
 		$autres = array();
-		if ($dirReal !== false) {
-			foreach ((array) dol_dir_list($dirReal, 'files', 0, '\.pdf$', '', 'date', SORT_DESC) as $f) {
-				if ($f['name'] === $name.'.pdf') {
-					continue;
-				}
-				$autres[] = array('fichier' => $f['name'], 'date_modification' => dol_print_date($f['date'], 'dayhourrfc'));
+		foreach ($files as $fn => $date) {
+			if ($fn !== $chosen) {
+				$autres[] = array('fichier' => $fn, 'date_modification' => dol_print_date($date, 'dayhourrfc'));
 			}
 		}
 
@@ -436,7 +477,7 @@ class ClaudeVerifTools
 
 		$meta = array(
 			'commande' => $cmd->ref,
-			'fichier' => $name.'.pdf',
+			'fichier' => $chosen,
 			'date_pdf' => dol_print_date($mtime, 'dayhourrfc'),
 			'date_modification_commande' => $tms ? dol_print_date($tms, 'dayhourrfc') : null,
 		);
@@ -448,7 +489,7 @@ class ClaudeVerifTools
 		$meta['nb_pages'] = $analysis['nb_pages'] ?? null;
 		$meta['autres_pdf'] = $autres;
 
-		return $pdf->read($content, 'PDF de la commande '.$cmd->ref.' : '.$name.'.pdf', $mode, $pages, $meta, true);
+		return $pdf->read($content, 'PDF de la commande '.$cmd->ref.' : '.$chosen, $mode, $pages, $meta, true);
 	}
 
 	/**
