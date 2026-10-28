@@ -104,6 +104,7 @@ class ClaudeVerifMcpServer
 				."Démarche : get_commande, puis search_mails avec des termes tirés de la commande (réf. client, n° de commande client, chantier, contacts), puis get_mail. "
 				."Les pièces jointes .docx, .doc et PDF avec texte sont lues par get_mail ; pour un PDF scanné ou une image, utiliser get_piece_jointe. "
 				."Factures : controle_facture calcule commandé / livré / facturé par produit ; en interpréter les alertes sans refaire les calculs. "
+				."Stock : get_stock donne stock physique, reste à livrer clients, reste à recevoir fournisseurs et stock virtuel par produit. "
 				."Montants en euros HT sauf mention contraire.",
 		);
 	}
