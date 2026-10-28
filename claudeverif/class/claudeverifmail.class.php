@@ -228,7 +228,7 @@ class ClaudeVerifMail
 		$uid = (int) ($args['uid'] ?? 0);
 		$index = (int) ($args['index'] ?? 0);
 		$mode = (string) ($args['mode'] ?? 'auto');
-		$pages = $this->parsePages((string) ($args['pages'] ?? ''));
+		$pages = ClaudeVerifPdf::parsePages((string) ($args['pages'] ?? ''));
 		if ($uid <= 0 || $index <= 0) {
 			throw new Exception("Indiquer 'uid' et 'index' (obtenus avec get_mail)");
 		}
@@ -272,47 +272,7 @@ class ClaudeVerifMail
 		}
 
 		$pdf = new ClaudeVerifPdf();
-		if ($mode === 'texte') {
-			return array('piece_jointe' => $name) + $pdf->analyze($content);
-		}
-		if ($mode === 'ocr') {
-			return array('piece_jointe' => $name, 'source' => 'OCR Mistral', 'texte' => $pdf->ocrMistral($content));
-		}
-
-		// auto / images
-		$analysis = $pdf->analyze($content);
-		if ($mode === 'auto' && empty($analysis['erreur']) && empty($analysis['pages_scannees'])) {
-			return array('piece_jointe' => $name, 'info' => 'PDF avec texte, pas de page scannée') + $analysis;
-		}
-		if ($mode === 'auto' && !$pages && !empty($analysis['pages_scannees'])) {
-			$pages = $analysis['pages_scannees'];
-		}
-
-		$res = $pdf->pageImages($content, $pages);
-		if (!$res['images']) {
-			$reasons = array();
-			foreach ($res['ignorees'] as $ig) {
-				$reasons[] = 'page '.$ig['page'].' : '.$ig['raison'];
-			}
-			if (getDolGlobalString('CLAUDEVERIF_MISTRAL_KEY') !== '') {
-				return array('piece_jointe' => $name, 'source' => 'OCR Mistral (pages non convertibles en images)', 'texte' => $pdf->ocrMistral($content));
-			}
-			throw new Exception('Aucune page convertible en image ('.implode(' ; ', $reasons).'). OCR Mistral non configuré : vérifier ce document manuellement.');
-		}
-
-		$summary = $head.' — '.$res['nb_pages'].' page(s), images des pages '.implode(', ', array_column($res['images'], 'page')).'.';
-		if (!empty($analysis['texte'])) {
-			$summary .= "\n\nTexte présent dans le PDF :\n".$analysis['texte'];
-		}
-		foreach ($res['ignorees'] as $ig) {
-			$summary .= "\nPage ".$ig['page'].' non incluse : '.$ig['raison'];
-		}
-		$out = array(array('type' => 'text', 'text' => $summary));
-		foreach ($res['images'] as $img) {
-			$out[] = array('type' => 'text', 'text' => 'Page '.$img['page'].' :');
-			$out[] = array('type' => 'image', 'data' => $img['data'], 'mimeType' => 'image/jpeg');
-		}
-		return array('_mcp_content' => $out);
+		return $pdf->read($content, $head, $mode, $pages, array('piece_jointe' => $name));
 	}
 
 	/**
@@ -378,27 +338,6 @@ class ClaudeVerifMail
 			throw new Exception('Mail introuvable : uid '.$uid);
 		}
 		return $m;
-	}
-
-	/**
-	 * "1-3,5" -> [1,2,3,5]
-	 *
-	 * @param string $s Pages
-	 * @return int[]
-	 */
-	private function parsePages($s)
-	{
-		$out = array();
-		foreach (preg_split('/[,;\s]+/', trim($s), -1, PREG_SPLIT_NO_EMPTY) as $part) {
-			if (preg_match('/^(\d+)-(\d+)$/', $part, $m)) {
-				for ($i = (int) $m[1]; $i <= (int) $m[2] && $i - (int) $m[1] < 50; $i++) {
-					$out[] = $i;
-				}
-			} elseif (ctype_digit($part)) {
-				$out[] = (int) $part;
-			}
-		}
-		return array_values(array_unique($out));
 	}
 
 	/**

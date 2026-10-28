@@ -108,12 +108,13 @@ class ClaudeVerifPdf
 	/**
 	 * Images JPEG des pages (pour les scans)
 	 *
-	 * @param string $content Contenu binaire
-	 * @param array  $wanted  Numéros de pages voulus (vide = toutes, dans la limite)
+	 * @param string $content     Contenu binaire
+	 * @param array  $wanted      Numéros de pages voulus (vide = toutes, dans la limite)
+	 * @param array  $renderPages Pages à rendre en entier (PDF généré, avec texte) au lieu d'en extraire l'image principale
 	 * @return array ['images' => [[page, data(base64)]], 'ignorees' => [[page, raison]], 'nb_pages' => n]
 	 * @throws Exception
 	 */
-	public function pageImages($content, $wanted = array())
+	public function pageImages($content, $wanted = array(), $renderPages = array())
 	{
 		if (!function_exists('imagecreatefromstring')) {
 			throw new Exception('Extension GD absente : conversion des pages en images impossible');
@@ -131,6 +132,16 @@ class ClaudeVerifPdf
 			}
 			if (count($images) >= self::MAX_PAGES_IMAGES) {
 				$skipped[] = array('page' => $n, 'raison' => 'limite de '.self::MAX_PAGES_IMAGES.' pages par appel : redemander avec le paramètre pages');
+				continue;
+			}
+
+			// Page avec texte (document généré) : rendu complet de la page
+			if (in_array($n, $renderPages, true)) {
+				try {
+					$images[] = array('page' => $n, 'data' => base64_encode($this->renderPage($content, $n)));
+				} catch (Throwable $e) {
+					$skipped[] = array('page' => $n, 'raison' => $e->getMessage());
+				}
 				continue;
 			}
 
@@ -166,7 +177,192 @@ class ClaudeVerifPdf
 			}
 		}
 
+		$this->cleanRender();
 		return array('images' => $images, 'ignorees' => $skipped, 'nb_pages' => $n);
+	}
+
+	/** @var string|null Fichier temporaire du PDF en cours de rendu */
+	private $renderFile = null;
+
+	/**
+	 * Rendu complet d'une page en JPEG (Imagick + Ghostscript)
+	 *
+	 * @param string $content Contenu binaire du PDF
+	 * @param int    $n       Numéro de page (1 = première)
+	 * @return string JPEG
+	 * @throws Exception
+	 */
+	private function renderPage($content, $n)
+	{
+		if (!class_exists('Imagick')) {
+			throw new Exception("rendu en image impossible (extension Imagick absente sur le serveur) : utiliser le mode texte");
+		}
+		if ($this->renderFile === null) {
+			// Copie temporaire dans documents/claudeverif/temp, supprimée après le rendu
+			$this->renderFile = $this->tempFile('pdf');
+			file_put_contents($this->renderFile, $content);
+		}
+		try {
+			$im = new Imagick();
+			$im->setResolution(150, 150);
+			$im->readImage($this->renderFile.'['.((int) $n - 1).']');
+			$im->setImageBackgroundColor('white');
+			$flat = $im->mergeImageLayers(Imagick::LAYERMETHOD_FLATTEN);
+			$flat->setImageFormat('png');
+			$blob = $flat->getImageBlob();
+			$flat->clear();
+			$im->clear();
+		} catch (Throwable $e) {
+			throw new Exception('rendu en image impossible ('.$e->getMessage().') : utiliser le mode texte');
+		}
+		$gd = @imagecreatefromstring($blob);
+		if (!$gd) {
+			throw new Exception('rendu en image illisible');
+		}
+		$jpeg = $this->toJpeg($gd);
+		imagedestroy($gd);
+		return $jpeg;
+	}
+
+	/**
+	 * Supprime le fichier temporaire de rendu
+	 *
+	 * @return void
+	 */
+	private function cleanRender()
+	{
+		if ($this->renderFile !== null) {
+			@unlink($this->renderFile);
+			$this->renderFile = null;
+		}
+	}
+
+	/**
+	 * Lecture d'un PDF selon le mode (partagé par get_piece_jointe et get_pdf_commande)
+	 *
+	 * @param string $content Contenu binaire du PDF
+	 * @param string $label   Libellé du document (en tête de la réponse en images)
+	 * @param string $mode    auto | texte | images | ocr
+	 * @param int[]  $pages   Pages voulues (vide = défaut du mode)
+	 * @param array  $meta    Informations ajoutées à la réponse (nom du fichier, dates…)
+	 * @param bool   $render  true pour un PDF généré : pages avec texte rendues en entier (Imagick) en mode images
+	 * @return array Résultat (clé _mcp_content si images)
+	 * @throws Exception
+	 */
+	public function read($content, $label, $mode, $pages = array(), $meta = array(), $render = false)
+	{
+		if (!in_array($mode, array('auto', 'texte', 'images', 'ocr'), true)) {
+			throw new Exception("Mode inconnu : ".$mode." (auto, texte, images ou ocr)");
+		}
+		if ($mode === 'ocr') {
+			return $meta + array('source' => 'OCR Mistral', 'texte' => $this->ocrMistral($content));
+		}
+
+		$analysis = $this->analyze($content);
+		if ($mode === 'texte') {
+			return $meta + $this->filterPages($analysis, $pages);
+		}
+
+		// auto / images
+		if ($mode === 'auto' && empty($analysis['erreur']) && empty($analysis['pages_scannees'])) {
+			return $meta + array('info' => 'PDF avec texte, pas de page scannée') + $this->filterPages($analysis, $pages);
+		}
+		$text = $this->filterPages($analysis, $pages)['texte'] ?? '';
+		if ($mode === 'auto' && !$pages && !empty($analysis['pages_scannees'])) {
+			$pages = $analysis['pages_scannees'];
+		}
+
+		$renderPages = array();
+		if ($render && empty($analysis['erreur'])) {
+			for ($i = 1; $i <= (int) $analysis['nb_pages']; $i++) {
+				if (!in_array($i, (array) $analysis['pages_scannees'], true)) {
+					$renderPages[] = $i;
+				}
+			}
+		}
+
+		try {
+			$res = $this->pageImages($content, $pages, $renderPages);
+		} finally {
+			$this->cleanRender();
+		}
+		if (!$res['images']) {
+			$reasons = array();
+			foreach ($res['ignorees'] as $ig) {
+				$reasons[] = 'page '.$ig['page'].' : '.$ig['raison'];
+			}
+			if (getDolGlobalString('CLAUDEVERIF_MISTRAL_KEY') !== '') {
+				return $meta + array('source' => 'OCR Mistral (pages non convertibles en images)', 'texte' => $this->ocrMistral($content));
+			}
+			if ($text !== '') {
+				return $meta + array('note' => 'Pages non convertibles en images ('.implode(' ; ', $reasons).') : texte du PDF renvoyé à la place')
+					+ $this->filterPages($analysis, $pages);
+			}
+			throw new Exception('Aucune page convertible en image ('.($reasons ? implode(' ; ', $reasons) : 'pages demandées absentes').'). OCR Mistral non configuré : utiliser le mode texte ou vérifier ce document manuellement.');
+		}
+
+		$summary = $label.' — '.$res['nb_pages'].' page(s), images des pages '.implode(', ', array_column($res['images'], 'page')).'.';
+		$extra = $meta;
+		unset($extra['piece_jointe']);
+		if ($extra) {
+			$summary .= "\n".json_encode($extra, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE);
+		}
+		if ($text !== '') {
+			$summary .= "\n\nTexte présent dans le PDF :\n".$text;
+		}
+		foreach ($res['ignorees'] as $ig) {
+			$summary .= "\nPage ".$ig['page'].' non incluse : '.$ig['raison'];
+		}
+		$out = array(array('type' => 'text', 'text' => $summary));
+		foreach ($res['images'] as $img) {
+			$out[] = array('type' => 'text', 'text' => 'Page '.$img['page'].' :');
+			$out[] = array('type' => 'image', 'data' => $img['data'], 'mimeType' => 'image/jpeg');
+		}
+		return array('_mcp_content' => $out);
+	}
+
+	/**
+	 * Ne garde que le texte des pages voulues
+	 *
+	 * @param array $analysis Résultat de analyze()
+	 * @param int[] $pages    Pages voulues (vide = toutes)
+	 * @return array
+	 */
+	private function filterPages($analysis, $pages)
+	{
+		if (!$pages || !empty($analysis['erreur']) || ($analysis['texte'] ?? '') === '') {
+			return $analysis;
+		}
+		$keep = array();
+		foreach (preg_split('/\n\n(?=--- Page \d+ ---\n)/', $analysis['texte']) as $block) {
+			if (preg_match('/^--- Page (\d+) ---/', $block, $m) && in_array((int) $m[1], $pages, true)) {
+				$keep[] = $block;
+			}
+		}
+		$analysis['texte'] = implode("\n\n", $keep);
+		$analysis['pages_demandees'] = $pages;
+		return $analysis;
+	}
+
+	/**
+	 * "1-3,5" -> [1,2,3,5]
+	 *
+	 * @param string $s Pages
+	 * @return int[]
+	 */
+	public static function parsePages($s)
+	{
+		$out = array();
+		foreach (preg_split('/[,;\s]+/', trim($s), -1, PREG_SPLIT_NO_EMPTY) as $part) {
+			if (preg_match('/^(\d+)-(\d+)$/', $part, $m)) {
+				for ($i = (int) $m[1]; $i <= (int) $m[2] && $i - (int) $m[1] < 50; $i++) {
+					$out[] = $i;
+				}
+			} elseif (ctype_digit($part)) {
+				$out[] = (int) $part;
+			}
+		}
+		return array_values(array_unique($out));
 	}
 
 	/**

@@ -12,7 +12,7 @@ dol_include_once('/claudeverif/class/claudeveriftools.class.php');
 class ClaudeVerifMcpServer
 {
 	const SERVER_NAME = 'claudeverif';
-	const SERVER_VERSION = '0.4.0';
+	const SERVER_VERSION = '0.5.0';
 	const SUPPORTED_VERSIONS = array('2025-06-18', '2025-03-26', '2024-11-05');
 
 	/** @var DoliDB */
@@ -103,6 +103,7 @@ class ClaudeVerifMcpServer
 				."pour vérifier une commande saisie par rapport aux mails reçus du client. "
 				."Démarche : get_commande, puis search_mails avec des termes tirés de la commande (réf. client, n° de commande client, chantier, contacts), puis get_mail. "
 				."Les pièces jointes .docx, .doc et PDF avec texte sont lues par get_mail ; pour un PDF scanné ou une image, utiliser get_piece_jointe. "
+				."Avant envoi de l'AR au client : get_pdf_commande relit le PDF de la commande généré par Dolibarr (signale s'il n'est plus à jour). "
 				."Factures : controle_facture calcule commandé / livré / facturé par produit ; en interpréter les alertes sans refaire les calculs. "
 				."Stock : get_stock donne stock physique, reste à livrer clients, reste à recevoir fournisseurs et stock virtuel par produit. "
 				."Montants en euros HT sauf mention contraire.",

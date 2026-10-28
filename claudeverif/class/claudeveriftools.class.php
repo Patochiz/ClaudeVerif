@@ -7,7 +7,9 @@
 require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
 require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
 dol_include_once('/claudeverif/class/claudeverifmail.class.php');
+dol_include_once('/claudeverif/class/claudeverifpdf.class.php');
 
 /**
  * Outils MCP
@@ -68,6 +70,24 @@ class ClaudeVerifTools
 					'properties' => array(
 						'ref' => array('type' => 'string', 'description' => 'Référence Dolibarr exacte (ex. CO2609-0142)'),
 						'id' => array('type' => 'integer', 'description' => 'Identifiant interne (alternative à ref)'),
+					),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name' => 'get_pdf_commande',
+				'description' => "Relit le PDF de l'AR (accusé de réception de commande) tel que généré par Dolibarr, pour le vérifier avant envoi au client. "
+					."Renvoie le nom du fichier, sa date de modification (avec un avertissement si la commande a été modifiée après la génération du PDF : "
+					."le PDF n'est alors peut-être plus à jour), le nombre de pages et le contenu : texte extrait (mode auto ou texte), "
+					."pages en images (mode images, 5 pages max par appel, utiliser 'pages' pour la suite) ou OCR Mistral si configuré. "
+					."Liste aussi les autres PDF du dossier de la commande (sans les lire). Ne génère jamais le PDF : s'il est absent, le signaler.",
+				'inputSchema' => array(
+					'type' => 'object',
+					'properties' => array(
+						'ref' => array('type' => 'string', 'description' => 'Référence Dolibarr exacte de la commande (ex. 2610_049)'),
+						'id' => array('type' => 'integer', 'description' => 'Identifiant interne (alternative à ref)'),
+						'mode' => array('type' => 'string', 'enum' => array('auto', 'texte', 'images', 'ocr'), 'description' => 'Défaut : auto (texte du PDF)'),
+						'pages' => array('type' => 'string', 'description' => 'Pages voulues, ex. "1-3" ou "2,4" (défaut : toutes)'),
 					),
 					'additionalProperties' => false,
 				),
@@ -138,6 +158,8 @@ class ClaudeVerifTools
 				return $this->searchCommandes($args);
 			case 'get_commande':
 				return $this->getCommande($args);
+			case 'get_pdf_commande':
+				return $this->getPdfCommande($args);
 			case 'search_mails':
 				$mail = new ClaudeVerifMail();
 				return $mail->search($args);
@@ -319,6 +341,114 @@ class ClaudeVerifTools
 			'lignes' => $lines,
 			'url' => dol_buildpath('/commande/card.php', 2).'?id='.((int) $cmd->id),
 		);
+	}
+
+	/**
+	 * PDF de la commande (AR) tel que généré par Dolibarr — lecture seule, jamais de génération
+	 *
+	 * @param array $args ref | id, mode, pages
+	 * @return array
+	 * @throws Exception
+	 */
+	private function getPdfCommande($args)
+	{
+		global $conf;
+
+		$this->requireRight('commande', 'lire');
+
+		$id = (int) ($args['id'] ?? 0);
+		$ref = trim((string) ($args['ref'] ?? ''));
+		$mode = (string) ($args['mode'] ?? 'auto');
+		if ($mode === '') {
+			$mode = 'auto';
+		}
+		if (!in_array($mode, array('auto', 'texte', 'images', 'ocr'), true)) {
+			throw new Exception('Mode inconnu : '.$mode.' (auto, texte, images ou ocr)');
+		}
+		if (!$id && $ref === '') {
+			throw new Exception("Indiquer 'ref' ou 'id'");
+		}
+		// Référence : lettres, chiffres, _ - et parenthèses (brouillons « (PROV12) ») uniquement
+		if (!$id && !preg_match('/^[A-Za-z0-9_\-()]{1,128}$/', $ref)) {
+			throw new Exception('Référence de commande invalide : '.$ref);
+		}
+		$pages = ClaudeVerifPdf::parsePages((string) ($args['pages'] ?? ''));
+
+		$cmd = new Commande($this->db);
+		if ($cmd->fetch($id, $id ? '' : $ref) <= 0) {
+			throw new Exception('Commande introuvable : '.($id ? $id : $ref));
+		}
+
+		// Répertoire des documents de la commande, et chemin résolu qui doit rester dessous
+		$root = (string) ($conf->commande->multidir_output[$cmd->entity] ?? ($conf->commande->dir_output ?? ''));
+		$rootReal = $root !== '' ? realpath($root) : false;
+		if ($rootReal === false) {
+			throw new Exception('Répertoire des documents de commandes introuvable');
+		}
+		$name = dol_sanitizeFileName($cmd->ref);
+		if ($name === '' || $name === '.' || $name === '..') {
+			throw new Exception('Référence de commande invalide : '.$cmd->ref);
+		}
+		$dir = $root.'/'.$name;
+		$file = $dir.'/'.$name.'.pdf';
+
+		$dirReal = is_dir($dir) ? realpath($dir) : false;
+		if ($dirReal !== false && strpos($dirReal.'/', $rootReal.'/') !== 0) {
+			throw new Exception('Chemin refusé (hors du répertoire des commandes)');
+		}
+		$fileReal = is_file($file) ? realpath($file) : false;
+		if ($fileReal === false) {
+			throw new Exception('PDF non généré pour '.$cmd->ref.' (le générer depuis la fiche commande dans Dolibarr)');
+		}
+		if (strpos($fileReal, $rootReal.'/') !== 0) {
+			throw new Exception('Chemin refusé (hors du répertoire des commandes)');
+		}
+
+		$content = file_get_contents($fileReal);
+		if ($content === false) {
+			throw new Exception('Lecture du PDF impossible : '.$name.'.pdf');
+		}
+		$mtime = (int) filemtime($fileReal);
+
+		// Date de dernière modification de la commande (tms)
+		$tms = 0;
+		$resql = $this->db->query("SELECT tms FROM ".MAIN_DB_PREFIX."commande WHERE rowid = ".((int) $cmd->id));
+		if ($resql) {
+			if ($o = $this->db->fetch_object($resql)) {
+				$tms = (int) $this->db->jdate($o->tms);
+			}
+			$this->db->free($resql);
+		}
+
+		// Autres PDF du dossier (versions, pro forma…) : nom et date seulement
+		$autres = array();
+		if ($dirReal !== false) {
+			foreach ((array) dol_dir_list($dirReal, 'files', 0, '\.pdf$', '', 'date', SORT_DESC) as $f) {
+				if ($f['name'] === $name.'.pdf') {
+					continue;
+				}
+				$autres[] = array('fichier' => $f['name'], 'date_modification' => dol_print_date($f['date'], 'dayhourrfc'));
+			}
+		}
+
+		$pdf = new ClaudeVerifPdf();
+		$analysis = $pdf->analyze($content);
+
+		$meta = array(
+			'commande' => $cmd->ref,
+			'fichier' => $name.'.pdf',
+			'date_pdf' => dol_print_date($mtime, 'dayhourrfc'),
+			'date_modification_commande' => $tms ? dol_print_date($tms, 'dayhourrfc') : null,
+		);
+		// Marge : la génération du PDF met elle-même à jour la commande (dernier document) juste après l'écriture du fichier
+		if ($tms && $tms > $mtime + 60) {
+			$meta['avertissement'] = 'La commande a été modifiée après la génération du PDF ('.$meta['date_modification_commande']
+				.' > '.$meta['date_pdf'].') : le PDF n\'est peut-être plus à jour, le régénérer dans Dolibarr avant envoi.';
+		}
+		$meta['nb_pages'] = $analysis['nb_pages'] ?? null;
+		$meta['autres_pdf'] = $autres;
+
+		return $pdf->read($content, 'PDF de la commande '.$cmd->ref.' : '.$name.'.pdf', $mode, $pages, $meta, true);
 	}
 
 	/**
