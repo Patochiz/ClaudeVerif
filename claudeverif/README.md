@@ -22,10 +22,12 @@ Réponses attendues : JSON. Si HTML ou 401 : voir Dépannage.
 
 ## Outils
 - `search_commandes`, `get_commande` : recherche et détail des commandes clients.
-- `get_pdf_commande` : relit le PDF de l'AR tel que généré par Dolibarr (`documents/commande/REF/REF.pdf`), avant envoi au client.
-  Paramètres : `ref` ou `id`, `mode` (`auto` | `texte` | `images` | `ocr`, défaut `auto`), `pages` (ex. `"1-3"`).
+- `get_pdf_commande` : relit le PDF de l'AR tel que généré par Dolibarr, avant envoi au client.
+  Fichiers lus : `documents/commande/REF/REF*.pdf` (ex. `2610_047_AR.pdf`, `2610_047-FP.pdf`). Par défaut l'AR (`REF_AR.pdf`, sinon `REF.pdf`, sinon le plus récent) ;
+  un autre PDF de la commande se lit avec le paramètre `fichier`.
+  Paramètres : `ref` ou `id`, `fichier` (optionnel), `mode` (`auto` | `texte` | `images` | `ocr`, défaut `auto`), `pages` (ex. `"1-3"`).
   Renvoie le nom du fichier, sa date, un avertissement si la commande a été modifiée après la génération du PDF, le nombre de pages,
-  le contenu (texte, images des pages par 5 au plus, ou OCR Mistral) et la liste des autres PDF du dossier (sans les lire).
+  le contenu (texte, images des pages par 5 au plus, ou OCR Mistral) et la liste des autres PDF de la commande (sans les lire).
   Ne génère jamais le PDF : s'il est absent, l'outil le signale.
   Le mode `images` rend les pages avec l'extension PHP Imagick (et Ghostscript) ; si elle n'est pas disponible sur l'hébergement, le texte du PDF est renvoyé avec une note.
 - `search_mails`, `get_mail`, `get_piece_jointe` : boîte mail des commandes et pièces jointes.
