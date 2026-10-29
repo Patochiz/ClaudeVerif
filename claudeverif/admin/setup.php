@@ -33,6 +33,14 @@ if ($action == 'save') {
 	$error += (dolibarr_set_const($db, 'CLAUDEVERIF_IMAP_LOGIN', GETPOST('CLAUDEVERIF_IMAP_LOGIN', 'alphanohtml'), 'chaine', 0, '', $entity) < 0);
 	$error += (dolibarr_set_const($db, 'CLAUDEVERIF_IMAP_FOLDER', GETPOST('CLAUDEVERIF_IMAP_FOLDER', 'alphanohtml'), 'chaine', 0, '', $entity) < 0);
 
+	// Commandes fournisseurs : écritures désactivées par défaut
+	$error += (dolibarr_set_const($db, 'CLAUDEVERIF_ALLOW_LINK', GETPOST('CLAUDEVERIF_ALLOW_LINK', 'int') ? 1 : 0, 'chaine', 0, '', $entity) < 0);
+	$error += (dolibarr_set_const($db, 'CLAUDEVERIF_ALLOW_COSTPRICE', GETPOST('CLAUDEVERIF_ALLOW_COSTPRICE', 'int') ? 1 : 0, 'chaine', 0, '', $entity) < 0);
+	$prefix = trim(GETPOST('CLAUDEVERIF_TRANSPORT_PICKUP_PREFIX', 'alphanohtml'));
+	$error += (dolibarr_set_const($db, 'CLAUDEVERIF_TRANSPORT_PICKUP_PREFIX', ($prefix !== '' ? $prefix : 'ADRIT_'), 'chaine', 0, '', $entity) < 0);
+	$trps = trim(GETPOST('CLAUDEVERIF_TRANSPORT_PRODUCT', 'alphanohtml'));
+	$error += (dolibarr_set_const($db, 'CLAUDEVERIF_TRANSPORT_PRODUCT', ($trps !== '' ? $trps : 'PrixTrps'), 'chaine', 0, '', $entity) < 0);
+
 	// Mot de passe : modifié uniquement s'il est saisi, stocké chiffré
 	$pass = GETPOST('CLAUDEVERIF_IMAP_PASSWORD', 'none');
 	if ($pass !== '') {
@@ -109,7 +117,7 @@ print '<tr class="liste_titre"><td>Paramètre</td><td>Valeur</td></tr>';
 
 print '<tr class="oddeven"><td class="titlefield">Utilisateur de service</td><td>';
 print $form->select_dolusers(getDolGlobalInt('CLAUDEVERIF_USER_ID'), 'CLAUDEVERIF_USER_ID', 1);
-print '<br><span class="opacitymedium">Claude lit les données avec les droits de cet utilisateur. Créez un utilisateur dédié en lecture seule (commandes, tiers, produits).</span>';
+print '<br><span class="opacitymedium">Claude lit les données avec les droits de cet utilisateur. Créez un utilisateur dédié en lecture seule (commandes clients et fournisseurs, tiers, produits) ; droits d\'écriture seulement si les outils d\'écriture ci-dessous sont activés.</span>';
 print '</td></tr>';
 
 print '<tr class="oddeven"><td>Journaliser les appels</td><td>';
@@ -122,6 +130,20 @@ print '<tr class="oddeven"><td>Port (SSL)</td><td><input type="number" name="CLA
 print '<tr class="oddeven"><td>Identifiant (adresse mail)</td><td><input type="text" class="minwidth300" name="CLAUDEVERIF_IMAP_LOGIN" value="'.dol_escape_htmltag(getDolGlobalString('CLAUDEVERIF_IMAP_LOGIN')).'"></td></tr>';
 print '<tr class="oddeven"><td>Mot de passe</td><td><input type="password" autocomplete="new-password" name="CLAUDEVERIF_IMAP_PASSWORD" value="" placeholder="'.(getDolGlobalString('CLAUDEVERIF_IMAP_PASSWORD') ? '(enregistré — laisser vide pour conserver)' : '').'"></td></tr>';
 print '<tr class="oddeven"><td>Dossier</td><td><input type="text" name="CLAUDEVERIF_IMAP_FOLDER" value="'.dol_escape_htmltag(getDolGlobalString('CLAUDEVERIF_IMAP_FOLDER', 'INBOX')).'"></td></tr>';
+
+print '<tr class="liste_titre"><td colspan="2">Commandes fournisseurs et transports</td></tr>';
+print '<tr class="oddeven"><td>Autoriser Claude à lier des commandes fournisseurs entre elles</td><td>';
+print '<input type="checkbox" name="CLAUDEVERIF_ALLOW_LINK" value="1"'.(getDolGlobalInt('CLAUDEVERIF_ALLOW_LINK') ? ' checked' : '').'>';
+print ' <span class="opacitymedium">Outil lier_commandes_fournisseur (transport → commandes transportées). Ne crée que des liens, n\'en supprime aucun. '
+	.'L\'utilisateur de service doit avoir le droit Commandes fournisseurs → Créer/modifier.</span></td></tr>';
+print '<tr class="oddeven"><td>Autoriser Claude à mettre à jour le prix de revient des produits</td><td>';
+print '<input type="checkbox" name="CLAUDEVERIF_ALLOW_COSTPRICE" value="1"'.(getDolGlobalInt('CLAUDEVERIF_ALLOW_COSTPRICE') ? ' checked' : '').'>';
+print ' <span class="opacitymedium">Outil maj_prix_revient : modifie uniquement le prix de revient (ni PMP, ni prix fournisseurs, ni prix de vente). '
+	.'L\'utilisateur de service doit avoir le droit Produits → Créer/modifier.</span></td></tr>';
+print '<tr class="oddeven"><td>Préfixe des produits « adresse d\'enlèvement »</td><td><input type="text" name="CLAUDEVERIF_TRANSPORT_PICKUP_PREFIX" value="'.dol_escape_htmltag(getDolGlobalString('CLAUDEVERIF_TRANSPORT_PICKUP_PREFIX', 'ADRIT_')).'">';
+print ' <span class="opacitymedium">Une commande fournisseur contenant ce produit est une commande de transport (ex. ADRIT_METALSCREEN)</span></td></tr>';
+print '<tr class="oddeven"><td>Réf. du produit forfait transport</td><td><input type="text" name="CLAUDEVERIF_TRANSPORT_PRODUCT" value="'.dol_escape_htmltag(getDolGlobalString('CLAUDEVERIF_TRANSPORT_PRODUCT', 'PrixTrps')).'">';
+print ' <span class="opacitymedium">Sa description donne les dates d\'enlèvement et de livraison</span></td></tr>';
 
 print '<tr class="liste_titre"><td colspan="2">OCR (optionnel)</td></tr>';
 print '<tr class="oddeven"><td>Clé API Mistral</td><td><input type="password" autocomplete="new-password" class="minwidth300" name="CLAUDEVERIF_MISTRAL_KEY" value="" placeholder="'.(getDolGlobalString('CLAUDEVERIF_MISTRAL_KEY') ? '(enregistrée — laisser vide pour conserver, « - » pour supprimer)' : '').'">';

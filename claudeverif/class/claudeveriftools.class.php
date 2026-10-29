@@ -145,7 +145,7 @@ class ClaudeVerifTools
 				),
 			),
 		);
-		return array_merge($defs, ClaudeVerifInvoice::definitions(), ClaudeVerifStock::definitions());
+		return array_merge($defs, ClaudeVerifInvoice::definitions(), ClaudeVerifStock::definitions(), ClaudeVerifSupplier::definitions());
 	}
 
 	/**
@@ -184,6 +184,26 @@ class ClaudeVerifTools
 			case 'get_stock':
 				$stock = new ClaudeVerifStock($this->db, $this->user);
 				return $stock->getStock($args);
+			case 'search_commandes_fournisseur':
+				$sup = new ClaudeVerifSupplier($this->db, $this->user);
+				return $sup->searchCommandesFournisseur($args);
+			case 'get_commande_fournisseur':
+				$sup = new ClaudeVerifSupplier($this->db, $this->user);
+				return $sup->getCommandeFournisseur($args);
+			case 'rapprocher_transports':
+				$sup = new ClaudeVerifSupplier($this->db, $this->user);
+				return $sup->rapprocherTransports($args);
+			case 'calculer_prix_rendu':
+				$sup = new ClaudeVerifSupplier($this->db, $this->user);
+				return $sup->calculerPrixRendu($args);
+			case 'lier_commandes_fournisseur':
+				// Refus explicite dans la méthode si CLAUDEVERIF_ALLOW_LINK = 0
+				$sup = new ClaudeVerifSupplier($this->db, $this->user);
+				return $sup->lierCommandesFournisseur($args);
+			case 'maj_prix_revient':
+				// Refus explicite dans la méthode si CLAUDEVERIF_ALLOW_COSTPRICE = 0
+				$sup = new ClaudeVerifSupplier($this->db, $this->user);
+				return $sup->majPrixRevient($args);
 		}
 		throw new Exception('Outil inconnu : '.$name);
 	}
@@ -638,6 +658,7 @@ class ClaudeVerifTools
 	}
 }
 
-// Outils factures et stock (sous-classes : chargées après la classe mère)
+// Outils factures, stock et fournisseurs (sous-classes : chargées après la classe mère)
 dol_include_once('/claudeverif/class/claudeverifinvoice.class.php');
 dol_include_once('/claudeverif/class/claudeverifstock.class.php');
+dol_include_once('/claudeverif/class/claudeverifsupplier.class.php');
