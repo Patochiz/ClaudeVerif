@@ -12,7 +12,7 @@ dol_include_once('/claudeverif/class/claudeveriftools.class.php');
 class ClaudeVerifMcpServer
 {
 	const SERVER_NAME = 'claudeverif';
-	const SERVER_VERSION = '0.5.0';
+	const SERVER_VERSION = '0.6.0';
 	const SUPPORTED_VERSIONS = array('2025-06-18', '2025-03-26', '2024-11-05');
 
 	/** @var DoliDB */
@@ -99,13 +99,19 @@ class ClaudeVerifMcpServer
 			'capabilities' => array('tools' => array('listChanged' => false)),
 			'serverInfo' => array('name' => self::SERVER_NAME, 'version' => self::SERVER_VERSION),
 			'instructions' => "Connecteur de l'ERP Dolibarr de DIAMANT INDUSTRIE (plafonds métalliques suspendus). "
-				."Accès en lecture seule aux commandes et factures clients et à la boîte mail où arrivent les commandes, "
-				."pour vérifier une commande saisie par rapport aux mails reçus du client. "
+				."Accès en lecture aux commandes et factures clients, aux commandes fournisseurs (dont les commandes de transport) "
+				."et à la boîte mail où arrivent les commandes, pour vérifier une commande saisie par rapport aux mails reçus du client. "
 				."Démarche : get_commande, puis search_mails avec des termes tirés de la commande (réf. client, n° de commande client, chantier, contacts), puis get_mail. "
 				."Les pièces jointes .docx, .doc et PDF avec texte sont lues par get_mail ; pour un PDF scanné ou une image, utiliser get_piece_jointe. "
 				."Avant envoi de l'AR au client : get_pdf_commande relit le PDF de la commande généré par Dolibarr (signale s'il n'est plus à jour). "
 				."Factures : controle_facture calcule commandé / livré / facturé par produit ; en interpréter les alertes sans refaire les calculs. "
 				."Stock : get_stock donne stock physique, reste à livrer clients, reste à recevoir fournisseurs et stock virtuel par produit. "
+				."Commandes fournisseurs : search_commandes_fournisseur, get_commande_fournisseur. Une commande de transport est une commande fournisseur "
+				."chez le transporteur, avec une ligne adresse d'enlèvement (ADRIT_…). "
+				."Transports : rapprocher_transports, puis présenter les liaisons proposées à l'utilisateur et obtenir sa validation, puis lier_commandes_fournisseur. "
+				."Prix de revient : calculer_prix_rendu (prix rendu Brest), puis proposer le tableau ancien → nouveau prix de revient et obtenir l'accord explicite "
+				."de l'utilisateur, puis maj_prix_revient. Les outils d'écriture ne sont présents que s'ils sont activés dans la configuration du module ; "
+				."ne jamais les appeler sans validation explicite. "
 				."Montants en euros HT sauf mention contraire.",
 		);
 	}

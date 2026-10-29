@@ -23,10 +23,10 @@ class modClaudeVerif extends DolibarrModules
 		$this->family = 'other';
 		$this->module_position = '90';
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
-		$this->description = 'Connecteur MCP pour Claude : vérification des commandes clients (Dolibarr + mails IMAP)';
+		$this->description = 'Connecteur MCP pour Claude : vérification des commandes clients, commandes fournisseurs et transports (Dolibarr + mails IMAP)';
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'DIAMANT INDUSTRIE';
-		$this->version = '0.5.0';
+		$this->version = '0.6.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'technic';
 
